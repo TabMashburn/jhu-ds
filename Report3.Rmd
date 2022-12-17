@@ -1,0 +1,147 @@
+---
+title: "Practical Machine Learning Course Project"
+date: "2022-12-16"
+output: html_document
+---
+## Summary of Work
+A subset of 55 features was selected to be used for prediction. Using 5-fold cross validation performance of two models
+was examined and compared. The random forest model was selected due to better performance. It used 28 of the supplied
+55 predictors to fit the model. This model had a mean out-of-sample error rate of `0.0008`.
+
+## Part I: Feature Selection
+
+### Setup
+```{r, echo = TRUE, collapse = TRUE, warning = FALSE}
+install.packages("dplyr")
+library("dplyr")
+
+training_data <- read.csv("pml-training.csv")
+testing_data <- read.csv("pml-testing.csv")
+dim(training_data)
+#str(training_data)
+dim(testing_data)
+#str(testing_data)
+```
+
+### Data cleanup
+#### Remove irrelevant/redundant columns
+The column in the dataset named `X` contains the observation number. The `user_name` identifies the person performing
+the activity, and the `cvtd_timestamp` column contains the date which is likely redundant information given that the raw
+timestamp is also present in the dataset. Let's remove these three columns as they are unlikely to be useful predictors.
+```{r}
+data <- training_data %>% select(!c("X", "cvtd_timestamp", "user_name"))
+```
+#### Remove near zero variance columns
+Next, let's remove those columns that have close to zero variance. These have very few unique values so they are also
+unlikely to be helpful predictors.
+```{r}
+predictors_to_remove <- row.names(nearZeroVar(data, saveMetrics = TRUE, names = TRUE) %>% filter(zeroVar == TRUE | nzv == TRUE))
+data <- data %>% select(!all_of(predictors_to_remove))
+```
+#### Remove columns that are mostly (> 95%) NA
+Finally, let's explore the NA values within the dataset.
+```{r}
+dim(data)
+na_rowwise <- rowSums(is.na(data[, -97]))
+na_percentage_of_rows <- sum(na_rowwise > 0) / nrow(data)
+na_percentage_of_rows
+predictor_na_percentage <- lapply(data[, -97], function(x) {round(sum(is.na(x))/length(x), 2)})
+sum(predictor_na_percentage > 0)
+sum(predictor_na_percentage > .95)
+```
+From the output above, `r round(100*na_percentage_of_rows, 2)`% of all rows in the dataset are affected by NA values.
+Since such a large percentage of rows is affected, we cannot just drop the rows with NA values. Imputing values may also
+not be a great idea if this is needed for so many rows. There appear to be `r sum(predictor_na_percentage > 0.95)`
+columns that contain NA values and for each of these columns, NAs make up most of the data (> 95% of the data in the
+column is NA). These won't be very useful predictors, let's remove them. Once removed, there are no longer any NAs left
+in the data.
+
+```{r}
+predictor_names <- names(data[, -97])
+predictors_to_remove <- Filter(function (x) predictor_na_percentage[[x]] >= 0.95, predictor_names)
+data <- data %>% select(!all_of(predictors_to_remove))
+sum(is.na(data))
+```
+#### Cleaned up dataset
+This leaves us a cleaned up dataset with 55 predictors plus one additional column which is the response.
+```{r}
+dim(data)
+str(data)
+
+```
+## Part II: Model Selection
+
+### Model Training
+
+The code below sets up the environment for parallel processing. We're splitting the dataset into the predictor variables
+and the response variable, but using the entire training data set. We'll perform k-fold cross validation, which involves
+partitioning the training dataset into 5 equal groups or folds and using 4 of these at a time to train the models while
+using the remaining fold for validation. Performance will be measured and computed across the folds.
+
+We're going to try two ensemble methods - random forest and boosting - as ensemble methods can build a powerful model
+from weaker building block models. Since the dataset has a large number of predictors and we are unsure of the importance
+of each, using a method such as random forest that randomly selects a subset of predictors is a useful way to ensure we
+pick the right predictors for the model. Boosting on the other hand, might be a good candidate for its slow learning
+approach over something like bagging, so we'll also fit a boosted model for comparison.
+
+```{r}
+install.packages(c("caret", "doParallel", "parallel"))
+library("caret")
+library("doParallel")
+library("parallel")
+
+set.seed(36401)
+
+x <- data[,-56]
+y <- data[, 56]
+
+# Use `parallel` package instead of `doMC` for cross platform compatability
+# register the parallell technology with `foreach` before calling `train`
+cluster <- makeCluster(detectCores() - 1) # convention to leave 1 core for OS
+registerDoParallel(cluster)
+
+# Instead of the default resampling scheme (bootstrap), let's use 5-fold cross-validation
+fitControl <- trainControl(method = "cv", number = 5, allowParallel = TRUE)
+
+# Fit a random forest model
+fit_rf <- train(x, y, method = "rf", trControl = fitControl)
+
+# Fit a generalized boosted model
+fit_gbm <- train(x, y, method = "gbm", trControl = fitControl)
+
+stopCluster(cluster)
+registerDoSEQ()
+```
+### Model Selection
+The random forest model de-correlates the trees by picking a random sampling of predictors at each split.
+A set of 28 predictors was used in the optimal model based on accuracy. Accuracy of this model was 0.9991336, thus out-of-bag-error rate is `r 1-0.9991336`.
+```{r}
+fit_rf
+plot.train(fit_rf)
+confusionMatrix.train(fit_rf)
+```
+The boosted model had an accuracy of 0.9964321, thus out-of-bag error rate of `r 1-0.9964321`.
+```{r}
+fit_gbm
+plot.train(fit_gbm)
+confusionMatrix.train(fit_gbm)
+```
+The random forest model performs better than the boosted model, with higher mean accuracy and lower variance across the
+cross validation resamples, so we will pick it as our model for prediction.
+
+```{r}
+results <- resamples(list(RF=fit_rf, GBM=fit_gbm))
+results$values
+summary(results)
+bwplot(results)
+dotplot(results)
+```
+
+## Prediction
+We now use the trained random forest model to make predictions on the test data
+```{r}
+predictor_names <- names(data[, -56])
+testing_data <- testing_data %>% select(all_of(predictor_names))
+predictions_testing_data_rf <- predict.train(fit_rf, testing_data)
+predictions_testing_data_rf
+```
