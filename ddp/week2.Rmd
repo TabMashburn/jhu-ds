@@ -1,0 +1,56 @@
+---
+title: "Week 2 Assignment: R Markdown and Leaflet"
+subtitle: "JHU Data Science | Developing Data Products"
+date: "2023-01-06"
+output: html_document
+---
+
+Create a web page using R Markdown that features a map created with Leaflet. 
+
+## Setup
+```{r, echo=TRUE, message=FALSE}
+library(dplyr)
+library(leaflet)
+library(lubridate)
+```
+
+## Import and Update the Data
+Here we import a CSV file containing the data. The data contains the date and locations of upcoming tests of a dog activity/sport ([NACSW scent detection](https://nacsw.net/)), along with a URL of the test host's website where the premium/test entry information can be found.
+```{r, echo=TRUE, comment="", collapse=TRUE}
+df <- read.csv("forleaflet.csv")
+str(df)
+
+df <- df %>% 
+  mutate(
+    label = paste(location, " on ", date, sep = ""),
+    site = paste("<a href='", url, "'> Link to Premium </a>", sep = ""), 
+    wday = wday(df$date, label=TRUE))
+```
+
+## Create a Leaflet map
+Using leaflet, we'll create a map of the test locations. At zoomed out levels, the locations will cluster into a single markers. At the zoomed in level, the individual location markers will be blue if the test is on a weekend, red if the test is on a weekday. Hovering over a marker will reveal the location and test date associated with the marker. Clicking on a marker will reveal a clickable link to the test host's website for test entry.
+```{r, echo=TRUE, out.width=910}
+getColor <- function(df) {
+  sapply(df$wday, function(wday) {
+    if(wday == "Fri" || wday == "Sat" || wday == "Sun") {
+      "blue"
+    } else {
+      "red"
+    } }
+  )
+}
+
+icons <- awesomeIcons(
+  icon = 'ios-paw',
+  iconColor = 'white',
+  library = 'ion',
+  markerColor = getColor(df)
+)
+
+df %>%
+  leaflet() %>%
+  addTiles() %>%
+  addAwesomeMarkers(
+    ~lng, ~lat, icon=icons, label = ~label, popup =~site, clusterOptions = markerClusterOptions()) %>%
+  addLegend("topleft", title = "Test Day", labels = c("Weekday", "Weekend"), colors = c("#cf0c0c", "#03adfc"), opacity = 1)
+```
