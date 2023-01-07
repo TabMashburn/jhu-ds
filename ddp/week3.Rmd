@@ -1,0 +1,30 @@
+---
+title: "Week 3 Assignment"
+subtitle: "JHU DS Developing Data Products"
+output: ioslides_presentation
+date: "January 07, 2023"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+## Frost Days by State (1931-1960)
+
+```{r trials, echo = FALSE, message=FALSE}
+library(plotly)
+state_frost <- data.frame(State = state.abb, Frost = as.vector(state.x77[,7]))
+state_frost$hover <- with(state_frost, paste(State, '<br>', "Frost days:", Frost))
+borders <- list(color = toRGB("gray"))
+map_options <- list(
+  scope = 'usa',
+  projection = list(type = 'albers usa'),
+  showlakes = TRUE,
+  lakecolor = toRGB("white")
+)
+plot_ly(state_frost, z = state_frost$Frost, text = state_frost$hover, 
+        locations = state_frost$State, type = "choropleth", 
+        locationmode = "USA-states", color = state_frost$Frost, colors = "Blues",  
+        marker = list(line = borders)) %>%
+  layout(title = "Mean number of days with minimum temperature below freezing in capital or large city", geo = map_options)
+```
